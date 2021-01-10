@@ -89,7 +89,7 @@ private Map parseCatchAllMessage(String description) {
 	def zigbeeParse = zigbee.parse(description)
 
     // Enable debug to see the parsed zigbee message
-    log.debug "A catchall event was parsed as ${zigbeeParse}"
+    //log.debug "A catchall event was parsed as ${zigbeeParse}"
 
 	if (zigbeeParse.clusterId == 0x0006 && zigbeeParse.command == 0x01){
 		def onoff = zigbeeParse.data[-1]
