@@ -1,7 +1,7 @@
 /**
  *  Xiaomi Zigbee Smart Outlet - model ZNCZ02LM (CN/AU/NZ/AR)
  *  Device Handler for SmartThings
- *  Version 1.0 for new SmartThings App (2020)
+ *  Version 1.1 for new SmartThings App (2020)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -15,6 +15,8 @@
  *  Based on original device handler by Lazcad / RaveTam
  *  Updates and contributions to code by a4refillpad, bspranger, marcos-mvs, mike-debney, Tiago_Goncalves, and veeceeoh
  *  Modified based on bspranger's version 1.2 from Apr 2019
+ *
+ *  Update 1.1: Fix for correct encoding data type
  *
  */
 
@@ -188,9 +190,9 @@ def configure() {
 
     // The reporting config has to happen, as it is later used by the refresh() command while running the readAttribute() command
     zigbee.onOffConfig() + // Poll for the on/off status
-	zigbee.configureReporting(0x0002, 0x0000, 0x08, 1, 300, 0x01) + // Set reporting time for temperature, which is in Hex (8BIT)
-	zigbee.configureReporting(0x000C, 0x0055, 0x21, 1, 300, 0x01, [destEndpoint: 0x0002]) + // Set reporting time for power, which is in UINT16
-	zigbee.configureReporting(0x000C, 0x0055, 0x21, 1, 3600, 0x01, [destEndpoint: 0x0003]) // Set reporting time for energy usage, which is in UINT16
+	zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01) + // Set reporting time for temperature, which is INT16 (sgined INT16)
+	zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0002]) + // Set reporting time for power, which is in FLOAT4
+	zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0003]) // Set reporting time for energy usage, which is in FLOAT4
 
     return refresh()
 }
