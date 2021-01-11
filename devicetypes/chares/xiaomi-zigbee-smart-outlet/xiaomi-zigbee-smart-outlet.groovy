@@ -190,7 +190,7 @@ def configure() {
 
     // The reporting config has to happen, as it is later used by the refresh() command while running the readAttribute() command
     zigbee.onOffConfig() + // Poll for the on/off status
-	zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01) + // Set reporting time for temperature, which is INT16 (sgined INT16)
+	zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01) + // Set reporting time for temperature, which is INT16 (signed INT16)
 	zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0002]) + // Set reporting time for power, which is in FLOAT4
 	zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0003]) // Set reporting time for energy usage, which is in FLOAT4
 
@@ -211,9 +211,9 @@ def refresh() {
     // cluster 0C, attribute 55 contains both the power (endpoint 02, in watts) and usage (endpoint 03 in kWh)
 
     zigbee.onOffRefresh() + // Poll for the on/off state
-    zigbee.readAttribute(0x0002, 0x0000) + // Poll for the temperature in Hex
-    zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]) + // Poll for the power usage in Watts (INT16)
-    zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003]) // Poll for the energy usage in Kwh (INT16)
+    zigbee.readAttribute(0x0002, 0x0000) + // Poll for the temperature in INT16
+    zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]) + // Poll for the power usage in Watts (FLOAT4)
+    zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003]) // Poll for the energy usage in Kwh (FLOAT4)
 }
 
 
