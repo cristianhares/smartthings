@@ -2,6 +2,7 @@
  *  Xiaomi Zigbee Smart Outlet - model ZNCZ02LM (CN/AU/NZ/AR)
  *  Device Handler for SmartThings
  *  Version 1.4 (Jan 2021) for new SmartThings App (2020)
+ *  By Cristian H. Ares
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
