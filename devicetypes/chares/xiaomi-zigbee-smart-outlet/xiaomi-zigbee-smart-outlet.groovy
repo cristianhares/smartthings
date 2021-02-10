@@ -521,7 +521,7 @@ def Map parseReportedAttributeMessage(String description) {
         // Enable debug to see the parsed energy consumption zigbee message
 		displayTraceLog("Energy consumption zigbee event reported as ${energy} kWh")
 	}
-	else if (eventDescMap.cluster == "0702") {
+	else if (descMap.cluster == "0702") {
 		def energy_value = (zigbee.convertHexToInt(eventDescMap.value) / 1000)
 		sendEvent(name: "energy", value: energy_value.round(3), unit: "kWh")
 	}
