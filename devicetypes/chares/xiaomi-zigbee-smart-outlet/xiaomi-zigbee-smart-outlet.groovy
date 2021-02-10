@@ -702,7 +702,7 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
             Float roundFloatEnergyValue = Math.round(reducedFloatEnergyValue * 10000) / 10000
 
 			// Log to debug if enabled
-			displayTraceLog("Energy consumption in Wh is ${roundFloatEnergyValue}")
+			displayTraceLog("Energy consumption in kWh is ${roundFloatEnergyValue}")
 
 			// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
 			sendEvent(name: "energy", value: roundFloatEnergyValue, unit: 'kWh')
