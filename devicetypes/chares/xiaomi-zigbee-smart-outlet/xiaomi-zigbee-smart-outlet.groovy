@@ -117,7 +117,7 @@ metadata {
 	// Fingerprint Profile for Xiaomi Zigbee smart outlet ZHA device
 	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "LUMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
 	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "XIAOMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
-	fingerprint profileId: "0104", inClusters: "0000,0002,0003,0004,0005,0006,0009,0702,0B04", outClusters: "000A,0019", manufacturer: "LUMI", model: "lumi.plug.mmeu01", deviceJoinName: "Xiaomi ZNCZ04LM Mini Home Smart Socket"
+	fingerprint profileId: "0104", inClusters: "0000,0002,0003,0004,0005,0006,0009,0702,0B04", outClusters: "000A,0019", manufacturer: "LUMI", model: "lumi.plug.mmeu01", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
 
 	// Removed tiles code as new ST App uses the capabilities and ocfDeviceType to define the tiles (custom capabilities must be added through the CLI)
 
