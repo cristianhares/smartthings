@@ -1,7 +1,7 @@
 /**
- *  Xiaomi Zigbee Smart Outlet - model ZNCZ02LM (CN/AU/NZ/AR)
+ *  Xiaomi Zigbee Smart Outlet - model ZNCZ02LM (CN/AU/NZ/AR), experimental for ZNCZ04LM (EU), ZNCZ03LM (TAIWAN) and ZNCZ12LM (US)
  *  Device Handler for SmartThings
- *  Version 1.4 (Jan 2021) for new SmartThings App (2020)
+ *  Version 1.5 (Feb 2021) for new SmartThings App (2020)
  *  By Cristian H. Ares
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -24,6 +24,12 @@
  *  Understanding how to parse Xioami's hourly report partial code taken from veeceeoh's Xioami for Hubitat Temp/Humidity device handler
  *
  *  Understanding some of the values of Xioami's hourly report ugly hex string as big endian string value comes from deconz rest plugin github
+ *
+ * --------------------------------------------------------------------------------------------------------------------------------------------------
+ *
+ *  Missing Features:
+ *       - Reset power consumption to re-read the value when it changes (Xiaomi likes to keep the max value always on memory and not reset it)
+ *       - power memory (turn on when power failure is detected) [Code is done, needs testing on a newer firmware version of the outlet]
  *
  * --------------------------------------------------------------------------------------------------------------------------------------------------
  *
@@ -52,29 +58,40 @@
  *       - Reports now properly happen via Xiaomi's custom report attribute (kWh, power usage, Temperature), even if runEveryXXMinutes() doesnt work.
  *       - Default for temperature offset is now 6 degrees, as its the 'sweet spot' I seem to found with ZNCZ02LM.
  *
+ *  Update 1.5 (Jan 22, 2021):
+ *       - Experimental support for ZNCZ04LM (EU), ZNCZ03LM (TAIWAN), ZNCZ12LM (US)
+ *       - more ST behaviour comments
+ *       - handle null in log.info on the updated() method
+ *       - change ping() behavior to do refresh()
+ *       - changed configure() behavior logic, and added multi-model support
+ *       - Added 'missing features'
+ *
  * --------------------------------------------------------------------------------------------------------------------------------------------------
  *
  *  Notes regarding how some Xiaomi's devices like the ZNCZ02LM behaves:
  *       - They use custom non ZCL standard attributes for things like power and energy consumption
  *       - Sometimes the reporting values come as a zigbee message from cluster 0000 attribute ID FF01 or FF02 as a concatenated value of all readings
  *       - In the ZNCZ02LM the energy consumption in Wh doesn't reduce itself it it gets to 0, it will stay at around 114 Wh as it considers 0.1 being the default state
+ *       - Xiaomi devices mostly ignore the zigbee.configureReporting command (which is a helper method for "zdo bind"), and manual read attribute's are needed
+ *			    or the custom Xioami response parsing (zigbee message cluster 0000 and attributes id's FF01 or FF02) should be enough
  *
  *  Notes regarding how SmartThings behaves:
- *    - Due to the nature of 'events driven' zigbee reported values, if the values aren't returned as an event,
- *          the ST App vertical line graphs in the device view are ugly as there are gaps between times,
- *          but too many zigbee messages by defining 'null' in configureReporting will probably overload the network with messages.
- *    - A refresh() has to happen twice at least in the installed() phase to actually get the on/off state through zigbee.onOffRefresh() for some reason
- *    - Logs may appear as they happened twice, but is actually SmartThings servers showing the same log twice because of a sync issue.
- *    - only a checkInterval sendEvent is required in the installed() method to enroll a device into DeviceWatch
- *    - delayBetween does not send commands, so it needs to call a method that includes the commands in a list
- *    - "Health Check" capability is required for the checkInterval sendEvent configuration for deviceWatch
- *    - "Refresh" capability is required if you want to use the refresh() command to forcebly get zigbee attributes from a device
- *    - "Configuration" capability is required if you want to use settings in "edit settings" on the device in the App
- *    - while() loops behave HORRIBLY in SmartThings groovy, its better to have a method for them.
- *          example: a while() in a refresh will not work, but if you put that while() in a method (call it looper()), and refresh() contains looper(), it'll work.
- *    - the DataType class from the zigbee library is useless unless you do a "import physicalgraph.zigbee.zcl.DataType", this is not documented
- *    - SmartThings treats Hex as strings, so if you're trying to evaluate something as 0x21 you should as "21", it doesnt recognize a .toHexString() as a hex value
- *    - There's an undocumented method called resetEnergyMeter() I found by accident, might be worthy to be researched.
+ *       - Due to the nature of 'events driven' zigbee reported values, if the values aren't returned as an event,
+ *              the ST App vertical line graphs in the device view are ugly as there are gaps between times,
+ *              but too many zigbee messages by defining 'null' in configureReporting will probably overload the network with messages.
+ *       - A refresh() has to happen twice at least in the installed() phase to actually get the on/off state through zigbee.onOffRefresh() for some reason
+ *       - Logs may appear as they happened twice, but is actually SmartThings servers showing the same log twice because of a sync issue.
+ *       - only a checkInterval sendEvent is required in the installed() method to enroll a device into DeviceWatch
+ *       - delayBetween does not send commands, so it needs to call a method that includes the commands in a list
+ *       - "Health Check" capability is required for the checkInterval sendEvent configuration for deviceWatch
+ *       - "Refresh" capability is required if you want to use the refresh() command to forcebly get zigbee attributes from a device
+ *       - "Configuration" capability is required if you want to use settings in "edit settings" on the device in the App
+ *       - while() loops behave HORRIBLY in SmartThings groovy, its better to have a method for them.
+ *              example: a while() in a refresh will not work, but if you put that while() in a method (call it looper()), and refresh() contains looper(), it'll work.
+ *       - the DataType class from the zigbee library is useless unless you do a "import physicalgraph.zigbee.zcl.DataType", this is not documented
+ *       - SmartThings treats Hex as strings, so if you're trying to evaluate something as 0x21 you should as "21", it doesnt recognize a .toHexString() as a hex value
+ *       - There's an undocumented method called resetEnergyMeter() I found by accident, might be worthy to be researched.
+ *       - (according to comments made, zigbee commands have a 2000 delay built in already, and i've seen this in the logs, so no need for delayBetween())
  *
  */
 
@@ -100,6 +117,7 @@ metadata {
 	// Fingerprint Profile for Xiaomi Zigbee smart outlet ZHA device
 	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "LUMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
 	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "XIAOMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
+	fingerprint profileId: "0104", inClusters: "0000,0002,0003,0004,0005,0006,0009,0702,0B04", outClusters: "000A,0019", manufacturer: "LUMI", model: "lumi.plug.mmeu01", deviceJoinName: "Xiaomi ZNCZ04LM Mini Home Smart Socket"
 
 	// Removed tiles code as new ST App uses the capabilities and ocfDeviceType to define the tiles (custom capabilities must be added through the CLI)
 
@@ -175,7 +193,13 @@ def installed() {
 def updated() {
 	// 	The updated() method will call initialize(), this is part of how SmartThings works
 
-	log.info "Updating settings of the device"
+	// Handle the info print when the refresh rate is null, due to the first set not happening by default
+	if (refreshRate == null) {
+		log.info "Updating settings of the device, data poll refresh rate will be scheduled to run every 10 minutes"
+	}
+	else {
+		log.info "Updating settings of the device, data poll refresh rate will be scheduled to run every ${refreshRate} minutes"
+	}
 
 	// Unsechedule any schedule if there is any
 	unschedule(scheduledRefresh)
@@ -189,19 +213,15 @@ def updated() {
 	switch(refreshRate) {
 		case "5":
 			runEvery5Minutes(scheduledRefresh)
-			log.info "Data poll refresh rate has been updated and is scheduled to run every 5 minutes"
 			break
 		case "15":
 			runEvery15Minutes(scheduledRefresh)
-			log.info "Data poll refresh rate has been updated and is scheduled to run every 15 minutes"
 			break
 		case "30":
 			runEvery30Minutes(scheduledRefresh)
-			log.info "Data poll refresh rate has been updated and is scheduled to run every 30 minutes"
 			break
 		default:
 			runEvery10Minutes(scheduledRefresh)
-			log.info "Data poll refresh rate has been updated and is scheduled to run every 10 minutes"
 	}
 }
 
@@ -209,7 +229,7 @@ def updated() {
 // Add ping command for DeviceWatch to do a refresh in case device no longer sends any data
 def ping() {
 	// the custom scheduledRefresh() method will force a hub command, as the refresh() does not when not done manually
-	scheduledRefresh()
+	refresh()
 }
 
 
@@ -249,10 +269,45 @@ def configure() {
     // The reporting config has to happen, as it is later used by the refresh() command while running the readAttribute() command
 	// This basically sets how much time (min+max) and how much change has to happen for an event to trigger (example: usage went from 1Watts to 2Watts)
 
-	// Ensure a delay of 500ms happens between zigbee commands as I've seen weird things if all are sent one after another
-	delayBetween(zigbeeReportCommands(), 500)
-
 	// Initial temperature reading of ZNCZ02LM for some reason sometimes is 12.5 or 17.5 degrees, it might be 'internal operating temperature'
+
+	// Get the model to determine what to configure/refresh
+	def deviceModel = device.getDataValue("model")
+
+	List zigbeeReportCommands = []
+
+	if (deviceModel == "lumi.plug") {
+		// Set the reporting configuration
+		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
+		zigbeeReportCommands.add(zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0002])) // Set reporting time for power, which is in FLOAT4
+		zigbeeReportCommands.add(zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0003])) // Set reporting time for energy usage, which is in FLOAT4
+
+		// Do an initial refresh (as a refresh() doesnt happen at startup)
+		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
+		zigbeeReportCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]))  // Poll for the power usage in Watts (FLOAT4)
+		zigbeeReportCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003])) // Poll for the energy usage in Kwh (FLOAT4)
+
+		// Execute the commands in the list
+		zigbeeReportCommands
+	}
+	else if (deviceModel == "lumi.plug.mmeu01") {
+		// Set the reporting configuration
+		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0B04, 0x050B, 0x29, 0, 600, 0x01))  // Set reporting time for power, which is INT16 (signed INT16)
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0702, 0x0000, 0x25, 0, 1800, 0x01)) // Set reporting time for energy usage, which is in unsigned UINT48
+
+		// Do an initial refresh (as a refresh() doesnt happen at startup)
+		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0B04, 0x050B))  // Poll for the power usage in Watts (signed INT16)
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
+
+		// Execute the commands in the list
+		zigbeeReportCommands
+	}
 }
 
 
@@ -261,10 +316,28 @@ def refresh() {
     // Log when a refresh command is executed
 	log.info "Running refresh command and requesting refresh values from device"
 
-	// As per @nayeliz mentioned, delayBetween doesn't actually execute commands itself, so needs to call a method that actually does them
+	def deviceModel = device.getDataValue("model")
 
-	// Ensure a delay of 500ms happens between zigbee commands as I've seen weird things if all are sent one after another
-	delayBetween(zigbeeRefreshCommands(), 500)
+	List zigbeeRefreshCommands = []
+
+	if (deviceModel == "lumi.plug") {
+		zigbeeRefreshCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
+		zigbeeRefreshCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]))  // Poll for the power usage in Watts (FLOAT4)
+		zigbeeRefreshCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003])) // Poll for the energy usage in Kwh (FLOAT4)
+
+		// Execute the commands in the list
+		zigbeeRefreshCommands
+	}
+	else if (deviceModel == "lumi.plug.mmeu01") {
+		zigbeeRefreshCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
+		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0B04, 0x050B))  // Poll for the power usage in Watts (signed INT16)
+		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
+
+		// Execute the commands in the list
+		zigbeeReportCommands
+	}
 }
 
 
@@ -345,50 +418,35 @@ def displayTraceLog(message) {
 }
 
 
-// Couple update and refresh in a method to be called by delayBetween()
-def updateAndRefresh() {
-	[
-    	updated(),
-		refresh()
-    ]
-}
-
-
-// Group all the zigbee read attributes commands into one function/method, to be used by refresh() with a delay
-def zigbeeRefreshCommands() {
-	// Read the zigbee clusters on refresh, example clusters are:
-    // cluster 0 is the basic cluster
-    // cluster 1 attribute id 20 is battery (an outlet doesnt use battery, its mains powered)
-    // cluster 2 attribute id 0 is the temperature (Non ZCL standard)
-    // cluster 6 attribute id 0 is the on/off state, which can be obtained via the standard onOffRefresh()
-    // cluster 0C, attribute 55 contains both the power (endpoint 02, in watts) and usage (endpoint 03 in kWh)
-	[
-		zigbee.onOffRefresh(), // Poll for the on/off state
-		zigbee.readAttribute(0x0002, 0x0000), // Poll for the temperature in INT16
-		zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]), // Poll for the power usage in Watts (FLOAT4)
-		zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003]) // Poll for the energy usage in Kwh (FLOAT4)
-	]
-}
-
-
-// Group all the zigbee configur reporting commands into one function/method, to be used by a delayBetween()
-def zigbeeReportCommands() {
-	[
-    	zigbee.onOffConfig(), // Poll for the on/off status
-		zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01), // Set reporting time for temperature, which is INT16 (signed INT16)
-		zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0002]), // Set reporting time for power, which is in FLOAT4
-		zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0003]) // Set reporting time for energy usage, which is in FLOAT4
-		//updateAndRefresh() // Ensure an update and refresh happens so that the schedule is set, and first report is received
-	]
-}
-
-
 // Create a function specifically for scheduled refreshes
-def scheduledRefresh() {
+void scheduledRefresh() {
 	log.info "Running scheduled refresh command and requesting refresh values from device"
 
 	// As per @nayelyz mentioned, sendHubCommand is required when used outside of refresh(), since its a scheduled task
-	sendHubCommand(zigbeeRefreshCommands(), 500)
+	//
+	// It seems that sendHubCommand requires a HubAction object,
+	// but strangely breaking their own documentation, it doesnt nee a new physicalgraph.device.HubAction object to actually run
+
+	def deviceModel = device.getDataValue("model")
+
+	List refreshCommands = []
+
+
+	if (deviceModel == "lumi.plug") {
+		refreshCommands.add(zigbee.onOffRefresh()) // Read on/off state
+		refreshCommands.add(zigbee.readAttribute(0x0002, 0x0000)) // Poll for temperature
+		refreshCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002])) // poll for power
+		refreshCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003])) // poll for energy
+	}
+	else if (deviceModel == "lumi.plug.mmeu01") {
+		refreshCommands.add(zigbee.onOffRefresh()) // Read on/off state
+		refreshCommands.add(zigbee.readAttribute(0x0002, 0x0000)) // Poll for temperature
+		refreshCommands.add(zigbee.readAttribute(0x0B04, 0x050B)) // poll for power
+		refreshCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // poll for energy
+	}
+
+	// Send the list of commands to the hub, with the appropiate delay between them
+	sendHubCommand(refreshCommands, 2000)
 }
 
 
@@ -463,6 +521,14 @@ def Map parseReportedAttributeMessage(String description) {
         // Enable debug to see the parsed energy consumption zigbee message
 		displayTraceLog("Energy consumption zigbee event reported as ${energy} kWh")
 	}
+	else if (eventDescMap.cluster == "0702") {
+		def energy_value = (zigbee.convertHexToInt(eventDescMap.value) / 1000)
+		sendEvent(name: "energy", value: energy_value.round(3), unit: "kWh")
+	}
+    else if (descMap.cluster == "0008" && descMap.attrId == "0000") {
+		// This is to catch a specific off event that some Xiaomi's outlets generate
+    	sendEvent(name: "switch", value: "off")
+    }
 	return resultMap
 }
 
