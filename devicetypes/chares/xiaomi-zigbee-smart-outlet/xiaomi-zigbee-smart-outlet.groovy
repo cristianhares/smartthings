@@ -529,6 +529,9 @@ def Map parseReportedAttributeMessage(String description) {
 		// This is to catch a specific off event that some Xiaomi's outlets generate
     	sendEvent(name: "switch", value: "off")
     }
+	else {
+		displayTraceLog("Unknown cluster number ${descMap.cluster} with attribute Id ${descMap.attrId} has been detected")
+	}
 	return resultMap
 }
 
