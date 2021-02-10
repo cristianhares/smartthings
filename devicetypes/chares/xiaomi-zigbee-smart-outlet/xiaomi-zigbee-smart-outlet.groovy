@@ -58,7 +58,7 @@
  *       - Reports now properly happen via Xiaomi's custom report attribute (kWh, power usage, Temperature), even if runEveryXXMinutes() doesnt work.
  *       - Default for temperature offset is now 6 degrees, as its the 'sweet spot' I seem to found with ZNCZ02LM.
  *
- *  Update 1.5 (Jan 22, 2021):
+ *  Update 1.5 (Feb 10, 2021):
  *       - Experimental support for ZNCZ04LM (EU), ZNCZ03LM (TAIWAN), ZNCZ12LM (US)
  *       - more ST behaviour comments
  *       - handle null in log.info on the updated() method
