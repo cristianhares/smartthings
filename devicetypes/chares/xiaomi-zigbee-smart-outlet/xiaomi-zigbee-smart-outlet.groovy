@@ -66,6 +66,14 @@
  *       - changed configure() behavior logic, and added multi-model support
  *       - Added 'missing features'
  *
+ *  Update 1.6 (Feb 22, 2021):
+ *       - Experimental support for QBCZ11LM, SP-EUC01
+ *       - Added more logic for the experimental models
+ *       - Added experimental version of the power outage memory setting (02 and 04 model)
+ *       - Reorganized code for better readability
+ *       - Added more comments
+ *       - Added extra missing logic for non 02 or 04 models
+ *
  * --------------------------------------------------------------------------------------------------------------------------------------------------
  *
  *  Notes regarding how some Xiaomi's devices like the ZNCZ02LM behaves:
@@ -74,6 +82,7 @@
  *       - In the ZNCZ02LM the energy consumption in Wh doesn't reduce itself it it gets to 0, it will stay at around 114 Wh as it considers 0.1 being the default state
  *       - Xiaomi devices mostly ignore the zigbee.configureReporting command (which is a helper method for "zdo bind"), and manual read attribute's are needed
  *			    or the custom Xioami response parsing (zigbee message cluster 0000 and attributes id's FF01 or FF02) should be enough
+ *       - Out clusters 0019 (OTA updates) and 000A (Time) are zigbee standard
  *
  *  Notes regarding how SmartThings behaves:
  *       - Due to the nature of 'events driven' zigbee reported values, if the values aren't returned as an event,
@@ -112,12 +121,18 @@ metadata {
 		capability "Power Meter"
 		capability "Energy Meter"
 		capability "Health Check"
+		//capability "Signal Strength" // RSSI is pased on the Xiaomi data report, but LQI sometimes it doesnt
 	}
 
 	// Fingerprint Profile for Xiaomi Zigbee smart outlet ZHA device
-	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "LUMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
-	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "XIAOMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
-	fingerprint profileId: "0104", inClusters: "0000,0002,0003,0004,0005,0006,0009,0702,0B04", outClusters: "000A,0019", manufacturer: "LUMI", model: "lumi.plug.mmeu01", deviceJoinName: "Xiaomi Zigbee Smart Outlet"
+	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "LUMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee CN Smart Outlet" // ZNCZ02LM (China/Australia/New Zealand/Argentina)
+	fingerprint profileId: "0104", inClusters: "0000,0400,0003,0006", outClusters: "0019,000A", manufacturer: "XIAOMI", model: "lumi.plug", deviceJoinName: "Xiaomi Zigbee CN Smart Outlet" // ZNCZ02LM (China/Australia/New Zealand/Argentina)
+	fingerprint profileId: "0104", inClusters: "0000,0002,0003,0004,0005,0006,0009,0702,0B04", outClusters: "000A,0019", manufacturer: "LUMI", model: "lumi.plug.mmeu01", deviceJoinName: "Xiaomi Zigbee EU Smart Outlet" // ZNCZ04LM (EU)
+	fingerprint profileId: "0104", manufacturer: "LUMI", model: "lumi.plug.mitw01", deviceJoinName: "Xiaomi Zigbee TW Smart Outlet" // ZNCZ03LM (Taiwan)
+	fingerprint profileId: "0104", manufacturer: "LUMI", model: "lumi.plug.maus01", deviceJoinName: "Xiaomi Zigbee US Smart Outlet" // ZNCZ12LM (USA)
+	fingerprint profileId: "0104", manufacturer: "LUMI", model: "lumi.plug.maeu01", deviceJoinName: "Aqara Zigbee EU Smart Outlet" // SP-EUC01 (Aqara EU)
+	fingerprint profileId: "0104", manufacturer: "LUMI", model: "lumi.ctrl_86plug", deviceJoinName: "Xiaomi Zigbee CN Smart Wall Socket" // QBCZ11LM (Xiaomi CN Wall socket)
+	fingerprint profileId: "0104", manufacturer: "LUMI", model: "lumi.ctrl_86plug.aq1", deviceJoinName: "Aqara Zigbee CN Smart Wall Socket" // QBCZ11LM (Aqara CN Wall socket)
 
 	// Removed tiles code as new ST App uses the capabilities and ocfDeviceType to define the tiles (custom capabilities must be added through the CLI)
 
@@ -139,23 +154,46 @@ metadata {
 	rates << ["30" : "Refresh data every 30 minutes"]
 
 	preferences {
+		// Add a debugging option into the device settings
+		input name: "powerOutageMemory", type: "bool", title: "Set Power outage memory", description: "Toggles the power outage memory of the socket", defaultValue: false
+
 		// Temperature offset config. Set default at 6 as it is what i've seen is mostly for the ZNCZ02LM
 		input "temperatureOffset", "decimal", title: "Set temperature offset", description: "Adjust temperature in X degrees (default: 6)", range:"*..*", defaultValue: 6
 
 		// Allow the setting of the data poll refresh rate
 		input name: "refreshRate", type: "enum", title: "Refresh time rate", description: "Change the data poll refresh rate (default: 10)", options: rates, required: false, defaultValue: "10"
 
-		// Add a debugging option into the device settings
-		input name: "debugLogging", type: "bool", title: "Enable debug logging", description: "Enables the debug logging to see in the IDE", defaultValue: false
-
 		// Add a trace option into the device settings
 		input name: "traceLogging", type: "bool", title: "Enable trace logging", description: "Enables the trace logging to see in the IDE", defaultValue: false
+
+		// Add a debugging option into the device settings
+		input name: "debugLogging", type: "bool", title: "Enable debug logging", description: "Enables the debug logging to see in the IDE", defaultValue: false
 	}
 }
 
 
 /////////////////////////////////////////////////////////////////////////////////
 // Native SmartThings groovy methods declaration
+
+
+// initialize mostly happens exactly after device installation, or the updated() method executes
+//def initialize() {
+	//
+	// According to @nayeliz in ST forums, a DeviceWatch-Enroll is only needed in specific cases, the Health check capability should be enough
+
+	// IF you need to do a specific enrollment on DeviceWatch it must happen on initialize, there isn't much documentation of this
+	//sendEvent(name: "DeviceWatch-Enroll", value: JsonOutput.toJson([protocol: "zigbee", scheme:"untracked"]), displayed: false)
+
+	// Not entirely known what EnrolledUTDH does, but seems needed by DeviceWatch
+	//updateDataValue("EnrolledUTDH", "true")
+//}
+
+
+// This is an interesting one, its not documented yet it seems its the method to reset the energy meter counter
+//resetEnergyMeter() {
+	//This should happen when a runIn is executed maybe in the refresh() command, and clear up 000C/0055
+//}
+
 
 // Seems ths portion of code happens as soon as a device is installed in the hub
 def installed() {
@@ -176,17 +214,82 @@ def installed() {
 }
 
 
-// initialize mostly happens exactly after device installation, or the updated() method executes
-//def initialize() {
-	//
-	// According to @nayeliz in ST forums, a DeviceWatch-Enroll is only needed in specific cases, the Health check capability should be enough
+// Configure command section (runs at device add)
+def configure() {
+    // Log the configure stage
+	log.info "Configuring Reporting and Bindings, setting schedule and forcing first report"
 
-	// IF you need to do a specific enrollment on DeviceWatch it must happen on initialize, there isn't much documentation of this
-	//sendEvent(name: "DeviceWatch-Enroll", value: JsonOutput.toJson([protocol: "zigbee", scheme:"untracked"]), displayed: false)
+    // The Xiaomi Outlet ZNCZ02LM is not compliant with the ZCL standard, so simpleMeteringPowerConfig / simpleMeteringPowerRefresh / temperatureConfig cannot be used
 
-	// Not entirely known what EnrolledUTDH does, but seems needed by DeviceWatch
-	//updateDataValue("EnrolledUTDH", "true")
-//}
+    // The reporting config has to happen, as it is later used by the refresh() command while running the readAttribute() command
+	// This basically sets how much time (min+max) and how much change has to happen for an event to trigger (example: usage went from 1Watts to 2Watts)
+
+	// Initial temperature reading of ZNCZ02LM for some reason sometimes is 12.5 or 17.5 degrees, it might be 'internal operating temperature'
+
+	// Examples of setting an input field variable value
+	// device.updateSetting(inputName, [type: type, value: value])
+	// device.updateSetting(inputName, value)
+
+	// Set initial default value in the input field (as even if it has a defaultValue, if you query for it, it'll return null)
+	device.updateSetting(temperatureOffset, 6)
+	device.updateSetting(refreshRate, "10")
+
+	// To read the input setting value, one should do:
+	// device.getPreferenceValue("settingName")
+
+	// Get the model to determine what to configure/refresh
+	def deviceModel = device.getDataValue("model")
+
+	List zigbeeReportCommands = []
+
+	if (deviceModel == "lumi.plug") {
+
+		// Erase the kWh memory of the plug first
+		// Commented as it is pointless, since the FF01 keeps a separate memory and resets the value of endpoint 3, cluster 0x000C attribute 0x0055
+		//sendHubCommand(zigbee.writeAttribute(0x000C, 0x0055, 0x39, 0x00000000, [destEndpoint: 0x0003]))
+
+		// Set the reporting configuration
+		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
+		zigbeeReportCommands.add(zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0002])) // Set reporting time for power, which is in FLOAT4
+		zigbeeReportCommands.add(zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0003])) // Set reporting time for energy usage, which is in FLOAT4
+
+		// Do an initial refresh (as a refresh() doesnt happen at startup)
+		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
+		zigbeeReportCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]))  // Poll for the power usage in Watts (FLOAT4)
+		zigbeeReportCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003])) // Poll for the energy usage in Kwh (FLOAT4)
+
+		// Execute the commands in the list
+		zigbeeReportCommands
+	}
+	else if (deviceModel == "lumi.plug.mmeu01") {
+		// Set the reporting configuration
+		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0B04, 0x050B, 0x29, 0, 600, 0x01))  // Set reporting time for power, which is INT16 (signed INT16)
+		zigbeeReportCommands.add(zigbee.configureReporting(0x0702, 0x0000, 0x25, 0, 1800, 0x01)) // Set reporting time for energy usage, which is in unsigned UINT48
+
+		// Do an initial refresh (as a refresh() doesnt happen at startup)
+		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0B04, 0x050B))  // Poll for the power usage in Watts (signed INT16)
+		zigbeeReportCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
+
+		// Execute the commands in the list
+		zigbeeReportCommands
+	}
+	else {
+		// Set the reporting configuration
+		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
+
+		// Do an initial refresh (as a refresh() doesnt happen at startup)
+		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+
+		// Execute the commands in the list
+		zigbeeReportCommands
+	}
+}
 
 
 // updated() seems to happen for example after you save settings in the device (it also seems to happen after install)
@@ -222,6 +325,44 @@ def updated() {
 			break
 		default:
 			runEvery10Minutes(scheduledRefresh)
+	}
+
+	// Get the device model for the power outage memory setting
+	def deviceModel = device.getDataValue("model")
+
+	// Check for power outage memory setting
+	if (powerOutageMemory) {
+		// Turn on power outage memory if the value is true
+		if (deviceModel == "lumi.plug" || deviceModel == "lumi.ctrl_86plug" || deviceModel == "lumi.ctrl_86plug.aq1") {
+			// need to understand what to do yet in ZNCZ02LM and QBCZ11LM as comments below in commented method set_power_memory()
+			//
+			// I know the octet values is one of these, but not sure yet which or all, or how exactly it expects them:
+			//    [[0xaa, 0x80, 0x05, 0xd1, 0x47, 0x07, 0x01, 0x10, 0x01], [0xaa, 0x80, 0x03, 0xd3, 0x07, 0x08, 0x01]] :
+			//    [[0xaa, 0x80, 0x05, 0xd1, 0x47, 0x09, 0x01, 0x10, 0x00], [0xaa, 0x80, 0x03, 0xd3, 0x07, 0x0a, 0x01]];
+			//
+			// zigbee.writeAttribute() does not work with type 0x41 (STRING_OCTET), so we need to use the old st wattr
+			// "st wattr 0x${device.deviceNetworkId} 1 0 0xFFF0 0x41 {0xaa, 0x10, 0x05, 0x41, 0x47, 0x01, 0x01, 0x10, 0x01}"
+			//
+			// we know the value is there by doing the following (which will throw a warn message saying variable length detected):
+			// zigbeeRefreshCommands.add(zigbee.readAttribute(0x0000, 0xFFF0, [mfgCode: 0x115F]))
+			//
+			// Type 0x41 requires the octets sent all together without the 0x, manufacturer goes after {data}
+			//"st wattr 0x${device.deviceNetworkId} 1 0 0xFFF0 0x41 {AA1005414701011001} 0x115F"
+		}
+		else if (deviceModel == "lumi.plug.mmeu01" ) {
+			// For the ZNCZ04LM, cluster 0xFCC0 holds the outage memory (attribute Id 0x0201), and something called "auto off" (attribute ID 0x0202)
+			zigbee.writeAttribute(0xFCC0, 0x0201, 0x10, 1)
+		}
+	}
+	else {
+		// Turn off power outage memory if not true or null
+		if (deviceModel == "lumi.plug" || deviceModel == "lumi.ctrl_86plug" || deviceModel == "lumi.ctrl_86plug.aq1") {
+			// need to understand what to do yet in ZNCZ02LM and QBCZ11LM as comments below in commented method set_power_memory()
+		}
+		else if (deviceModel == "lumi.plug.mmeu01" ) {
+			// For the ZNCZ04LM, cluster 0xFCC0 holds the outage memory (attribute Id 0x0201), and something called "auto off" (attribute ID 0x0202)
+			zigbee.writeAttribute(0xFCC0, 0x0201, 0x10, 0)
+		}
 	}
 }
 
@@ -259,58 +400,6 @@ def on() {
 }
 
 
-// Configure command section (runs at device add)
-def configure() {
-    // Log the configure stage
-	log.info "Configuring Reporting and Bindings, setting schedule and forcing first report"
-
-    // The Xiaomi Outlet ZNCZ02LM is not compliant with the ZCL standard, so simpleMeteringPowerConfig / simpleMeteringPowerRefresh / temperatureConfig cannot be used
-
-    // The reporting config has to happen, as it is later used by the refresh() command while running the readAttribute() command
-	// This basically sets how much time (min+max) and how much change has to happen for an event to trigger (example: usage went from 1Watts to 2Watts)
-
-	// Initial temperature reading of ZNCZ02LM for some reason sometimes is 12.5 or 17.5 degrees, it might be 'internal operating temperature'
-
-	// Get the model to determine what to configure/refresh
-	def deviceModel = device.getDataValue("model")
-
-	List zigbeeReportCommands = []
-
-	if (deviceModel == "lumi.plug") {
-		// Set the reporting configuration
-		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
-		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
-		zigbeeReportCommands.add(zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0002])) // Set reporting time for power, which is in FLOAT4
-		zigbeeReportCommands.add(zigbee.configureReporting(0x000C, 0x0055, 0x39, 1, 300, 0x01, [destEndpoint: 0x0003])) // Set reporting time for energy usage, which is in FLOAT4
-
-		// Do an initial refresh (as a refresh() doesnt happen at startup)
-		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
-		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
-		zigbeeReportCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002]))  // Poll for the power usage in Watts (FLOAT4)
-		zigbeeReportCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003])) // Poll for the energy usage in Kwh (FLOAT4)
-
-		// Execute the commands in the list
-		zigbeeReportCommands
-	}
-	else if (deviceModel == "lumi.plug.mmeu01") {
-		// Set the reporting configuration
-		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
-		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
-		zigbeeReportCommands.add(zigbee.configureReporting(0x0B04, 0x050B, 0x29, 0, 600, 0x01))  // Set reporting time for power, which is INT16 (signed INT16)
-		zigbeeReportCommands.add(zigbee.configureReporting(0x0702, 0x0000, 0x25, 0, 1800, 0x01)) // Set reporting time for energy usage, which is in unsigned UINT48
-
-		// Do an initial refresh (as a refresh() doesnt happen at startup)
-		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
-		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
-		zigbeeReportCommands.add(zigbee.readAttribute(0x0B04, 0x050B))  // Poll for the power usage in Watts (signed INT16)
-		zigbeeReportCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
-
-		// Execute the commands in the list
-		zigbeeReportCommands
-	}
-}
-
-
 // Refresh command section (runs at refresh requests)
 def refresh() {
     // Log when a refresh command is executed
@@ -336,15 +425,15 @@ def refresh() {
 		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
 
 		// Execute the commands in the list
-		zigbeeReportCommands
+		zigbeeRefreshCommands
+	}
+	else {
+		zigbeeRefreshCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
+
+		// Execute the commands in the list
+		zigbeeRefreshCommands
 	}
 }
-
-
-// This is an interesting one, its not documented yet it seems its the method to reset the energy meter counter
-//resetEnergyMeter() {
-	//This should happen when a runIn is executed maybe in the refresh() command, and clear up 000C/0055
-//}
 
 
 // Parse incoming device messages to generate events
@@ -423,9 +512,10 @@ void scheduledRefresh() {
 	log.info "Running scheduled refresh command and requesting refresh values from device"
 
 	// As per @nayelyz mentioned, sendHubCommand is required when used outside of refresh(), since its a scheduled task
+	// but this doesnt seem to be backed up as it'll work regardless, which im guessing it sends a sendHubCommand when you run a zigbee.*
 	//
 	// It seems that sendHubCommand requires a HubAction object,
-	// but strangely breaking their own documentation, it doesnt nee a new physicalgraph.device.HubAction object to actually run
+	// but strangely breaking their own documentation, it doesnt need a new physicalgraph.device.HubAction object to actually run
 
 	def deviceModel = device.getDataValue("model")
 
@@ -443,6 +533,9 @@ void scheduledRefresh() {
 		refreshCommands.add(zigbee.readAttribute(0x0002, 0x0000)) // Poll for temperature
 		refreshCommands.add(zigbee.readAttribute(0x0B04, 0x050B)) // poll for power
 		refreshCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // poll for energy
+	}
+	else {
+		refreshCommands.add(zigbee.onOffRefresh())
 	}
 
 	// Send the list of commands to the hub, with the appropiate delay between them
@@ -628,8 +721,8 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
 	// If the tag is 0x65 and is a 16 bit int, its humidity (can also be on/off or unknown)
 	// If the tag is 0x66 and is a 32 bit int, its pressure (can also be unknown)
 	// If the tag is 0x95 and is a single float, its consumption in Watts / Hour (must do round(f * 1000) )
-	// If the tag is 0x96 and is a single float, its voltage  (must do round(f / 10) ) (can also be unknown)
-	// If the tag is 0x97 and is a single float, its current in mA  (can also be unknown)
+	// If the tag is 0x96 and is a single float, its voltage (must do round(f / 10) ) (can also be unknown)
+	// If the tag is 0x97 and is a single float, its current in mA (can also be unknown)
 	// If the tag is 0x98 and is a single float, its power in Watts
 
 	// Evaluate the data tag received and parse it if possible
@@ -639,13 +732,35 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
 			// Parse the temperature accordingly
 			int parsedTemperature = temperatureParse(incomingPayload)
 
-			// Log to debug if enabled
+			// Log to trace if enabled
 			displayTraceLog("Temperature in scale ${getTemperatureScale()} is ${parsedTemperature}")
 
 			// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
 			sendEvent(name: "temperature", value: parsedTemperature, unit: getTemperatureScale(), translatable: true)
 
 			break
+		// case "05":
+		// 	// Parse the RSSI
+		// 	int parsedRSSI = Integer.parseInt(incomingPayload, 16)
+
+		// 	// Log to trace if enabled
+		// 	displayTraceLog("RSSI value is ${parsedRSSI}")
+
+		// 	// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
+		// 	//sendEvent(name: "rssi", value: parsedRSSI)
+
+		// 	break
+		// case "06":
+		// 	// Parse the LQI
+		// 	int parsedLQI = Integer.parseInt(incomingPayload, 16)
+
+		// 	// Log to trace if enabled
+		// 	displayTraceLog("LQI value is ${parsedLQI}")
+
+		// 	// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
+		// 	//sendEvent(name: "lqi", value: parsedLQI)
+
+		// 	break
 		case "64":
 			// If its on/off
 			if (incomingDataType == "10") {
@@ -679,7 +794,7 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
 				// Get the temperature scale from the hub system
 				String temperatureScale = getTemperatureScale()
 
-				// Log to debug if enabled
+				// Log to trace if enabled
 				displayTraceLog("Temperature in scale ${temperatureScale} is ${parsedTemperature}")
 
 				// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
@@ -701,7 +816,7 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
             // Round to value to 4 decimal places
             Float roundFloatEnergyValue = Math.round(reducedFloatEnergyValue * 10000) / 10000
 
-			// Log to debug if enabled
+			// Log to trace if enabled
 			displayTraceLog("Energy consumption in kWh is ${roundFloatEnergyValue}")
 
 			// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
@@ -712,7 +827,7 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
 			// Voltage in V, not implemented as havent seen it reported in ZNCZ02LM
 			int voltageParsed = Integer.parseInt(incomingPayload, 16)
 
-			// Log to debug if enabled
+			// Log to trace if enabled
 			displayTraceLog("Voltage in V is ${voltageParsed}")
 
 			break
@@ -720,7 +835,7 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
 			// Current in mA, not implemented as havent seen it reported in ZNCZ02LM
 			int currentParsed = Integer.parseInt(incomingPayload, 16)
 
-			// Log to debug if enabled
+			// Log to trace if enabled
 			displayTraceLog("Current in mA is ${currentParsed}")
 
 			break
@@ -733,7 +848,7 @@ def executeXiaomiParsing(incomingDataTag, incomingDataType, incomingPayload) {
 			// Convert to float
         	Float floatPowerValue = Float.intBitsToFloat(parsedPower.intValue());
 
-			// Log to debug if enabled
+			// Log to trace if enabled
 			displayTraceLog("Power in Watts is ${floatPowerValue}")
 
 			// supposedly createEvent is uses in the parse() section (where we are at here), sendEvent creates AND fires the event if you are outside the parse()
@@ -774,29 +889,3 @@ def temperatureParse(inputTemperature) {
 
 	return temperature
 }
-
-
-// The following code should work later on for handling the power memory setting of ZNCZ02LM which is different to other Xiaomi outlets
-// My guess is that attribute 0xFFF0 is added by a firmware update (waiting for a Xiaomi Gateway gen3 to test this)
-//
-// The cluster is the basicConfig one (0x000), Attribute ID is 0xFFF0, and type is 0x41 (Octet)
-//
-// I know the octet values is one of these, but not sure yet which or all, or how exactly it expects them:
-//    [[0xaa, 0x80, 0x05, 0xd1, 0x47, 0x07, 0x01, 0x10, 0x01], [0xaa, 0x80, 0x03, 0xd3, 0x07, 0x08, 0x01]] :
-//    [[0xaa, 0x80, 0x05, 0xd1, 0x47, 0x09, 0x01, 0x10, 0x00], [0xaa, 0x80, 0x03, 0xd3, 0x07, 0x0a, 0x01]];
-//
-// And it seems that some ZNCZ02LM either don't support it or they require a firmware update
-//
-// Also not yet sure how exactly does "st wattr" expect an octet value
-//
-//def set_power_memory() {
-//
-//	//zigbee.writeAttribute() still doesnt support 0x41 (Octet) type
-//	//
-//  // Example of writeAttribute:
-//	//zigbee.writeAttribute(0x0000, 0xFFF0, 0x41, value1, [mfgCode:0x115F])
-//	//zigbee.writeAttribute(0x0000, 0xFFF0, 0x41, value2, [mfgCode:0x115F])
-//
-//  // Old "st wattr" method is required due to the previous comment to write the value
-//	"st wattr 0x${device.deviceNetworkId} 1 0 0xFFF0 0x41 {0xaa, 0x10, 0x05, 0x41, 0x47, 0x01, 0x01, 0x10, 0x01}"
-//}
