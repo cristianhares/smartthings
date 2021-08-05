@@ -1,7 +1,7 @@
 /**
  *  Xiaomi Zigbee Smart Outlet - model ZNCZ02LM (CN/AU/NZ/AR), experimental for ZNCZ04LM (EU), ZNCZ03LM (TAIWAN) and ZNCZ12LM (US)
  *  Device Handler for SmartThings
- *  Version 1.5 (Feb 2021) for new SmartThings App (2020)
+ *  Version 1.7 (Aug 2021) for new SmartThings App (2020)
  *  By Cristian H. Ares
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -73,6 +73,12 @@
  *       - Reorganized code for better readability
  *       - Added more comments
  *       - Added extra missing logic for non 02 or 04 models
+ *
+ *  Update 1.7 (Aug 5, 2021):
+ *       - Enhance experimental support for SP-EUC01
+ *       - Add experimental support for cluster 0B04 (Power)
+ *       - fixed cluster 0702 definition (was energy, not power)
+ *       - changed code to reflect native zigbee.x methods for power/energy (clusters 0B04 and 0702)
  *
  * --------------------------------------------------------------------------------------------------------------------------------------------------
  *
@@ -263,19 +269,18 @@ def configure() {
 		// Execute the commands in the list
 		zigbeeReportCommands
 	}
-	else if (deviceModel == "lumi.plug.mmeu01") {
+	else if (deviceModel == "lumi.plug.mmeu01" || deviceModel == "lumi.plug.maeu01") {
 		// Set the reporting configuration
 		zigbeeReportCommands.add(zigbee.onOffConfig()) // Set reporting for the on/off status
 		zigbeeReportCommands.add(zigbee.configureReporting(0x0002, 0x0000, 0x29, 1, 300, 0x01))  // Set reporting time for temperature, which is INT16 (signed INT16)
-		zigbeeReportCommands.add(zigbee.configureReporting(0x0B04, 0x050B, 0x29, 0, 600, 0x01))  // Set reporting time for power, which is INT16 (signed INT16)
-		zigbeeReportCommands.add(zigbee.configureReporting(0x0702, 0x0000, 0x25, 0, 1800, 0x01)) // Set reporting time for energy usage, which is in unsigned UINT48
+		zigbeeReportCommands.add(zigbee.simpleMeteringPowerConfig())  // Set reporting time for power
+		zigbeeReportCommands.add(zigbee.electricMeasurementPowerConfig()) // Set reporting time for energy usage
 
 		// Do an initial refresh (as a refresh() doesnt happen at startup)
 		zigbeeReportCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
 		zigbeeReportCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
-		zigbeeReportCommands.add(zigbee.readAttribute(0x0B04, 0x050B))  // Poll for the power usage in Watts (signed INT16)
-		zigbeeReportCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
-
+		zigbeeReportCommands.add(zigbee.simpleMeteringPowerRefresh())  // Poll for the power usage in Watts (signed INT16)
+		zigbeeReportCommands.add(zigbee.electricMeasurementPowerRefresh()) // Poll for the energy usage in Kwh (unsigned UINT48)
 		// Execute the commands in the list
 		zigbeeReportCommands
 	}
@@ -418,11 +423,11 @@ def refresh() {
 		// Execute the commands in the list
 		zigbeeRefreshCommands
 	}
-	else if (deviceModel == "lumi.plug.mmeu01") {
+	else if (deviceModel == "lumi.plug.mmeu01" || deviceModel == "lumi.plug.maeu01") {
 		zigbeeRefreshCommands.add(zigbee.onOffRefresh()) // Poll for the on/off state
 		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0002, 0x0000))  // Poll for the temperature in INT16
-		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0B04, 0x050B))  // Poll for the power usage in Watts (signed INT16)
-		zigbeeRefreshCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // Poll for the energy usage in Kwh (unsigned UINT48)
+		refreshCommands.add(zigbee.simpleMeteringPowerRefresh()) // poll for power
+		refreshCommands.add(zigbee.electricMeasurementPowerRefresh()) // poll for energy
 
 		// Execute the commands in the list
 		zigbeeRefreshCommands
@@ -528,11 +533,11 @@ void scheduledRefresh() {
 		refreshCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0002])) // poll for power
 		refreshCommands.add(zigbee.readAttribute(0x000C, 0x0055, [destEndpoint: 0x0003])) // poll for energy
 	}
-	else if (deviceModel == "lumi.plug.mmeu01") {
+	else if (deviceModel == "lumi.plug.mmeu01" || deviceModel == "lumi.plug.maeu01") {
 		refreshCommands.add(zigbee.onOffRefresh()) // Read on/off state
 		refreshCommands.add(zigbee.readAttribute(0x0002, 0x0000)) // Poll for temperature
-		refreshCommands.add(zigbee.readAttribute(0x0B04, 0x050B)) // poll for power
-		refreshCommands.add(zigbee.readAttribute(0x0702, 0x0000)) // poll for energy
+		refreshCommands.add(zigbee.simpleMeteringPowerRefresh()) // poll for power
+		refreshCommands.add(zigbee.electricMeasurementPowerRefresh()) // poll for energy
 	}
 	else {
 		refreshCommands.add(zigbee.onOffRefresh())
@@ -616,7 +621,17 @@ def Map parseReportedAttributeMessage(String description) {
 	}
 	else if (descMap.cluster == "0702") {
 		def energy_value = (zigbee.convertHexToInt(eventDescMap.value) / 1000)
-		sendEvent(name: "energy", value: energy_value.round(3), unit: "kWh")
+		sendEvent(name: "energy", value: energy_value.round(3), unit: "W")
+
+        // Enable debug to see the parsed energy consumption zigbee message
+		displayTraceLog("Energy consumption zigbee event reported as ${energy_value} kWh")
+	}
+	else if (descMap.cluster == "0B04") {
+		def power_value = zigbee.convertHexToInt(eventDescMap.value)
+		sendEvent(name: "power", value: power_value, unit: "kWh")
+
+        // Enable debug to see the parsed energy consumption zigbee message
+		displayTraceLog("Energy consumption zigbee event reported as ${power_value} W")
 	}
     else if (descMap.cluster == "0008" && descMap.attrId == "0000") {
 		// This is to catch a specific off event that some Xiaomi's outlets generate
