@@ -1,7 +1,7 @@
 /**
  *  Xiaomi Zigbee Smart Outlet - model ZNCZ02LM (CN/AU/NZ/AR), experimental for ZNCZ04LM (EU), ZNCZ03LM (TAIWAN) and ZNCZ12LM (US)
  *  Device Handler for SmartThings
- *  Version 1.7 (Aug 2021) for new SmartThings App (2020)
+ *  Version 1.7.1 (Aug 2021) for new SmartThings App (2020)
  *  By Cristian H. Ares
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -79,6 +79,7 @@
  *       - Add experimental support for cluster 0B04 (Power)
  *       - fixed cluster 0702 definition (was energy, not power)
  *       - changed code to reflect native zigbee.x methods for power/energy (clusters 0B04 and 0702)
+ *       - 1.7.1 update: mixed 0B04 with 0702 due to bad documentation from smartthings
  *
  * --------------------------------------------------------------------------------------------------------------------------------------------------
  *
@@ -620,18 +621,18 @@ def Map parseReportedAttributeMessage(String description) {
 		displayTraceLog("Energy consumption zigbee event reported as ${energy} kWh")
 	}
 	else if (descMap.cluster == "0702") {
-		def energy_value = (zigbee.convertHexToInt(eventDescMap.value) / 1000)
-		sendEvent(name: "energy", value: energy_value.round(3), unit: "W")
+		def power_value = zigbee.convertHexToInt(eventDescMap.value)
+		sendEvent(name: "power", value: power_value, unit: "W")
 
         // Enable debug to see the parsed energy consumption zigbee message
-		displayTraceLog("Energy consumption zigbee event reported as ${energy_value} kWh")
+		displayTraceLog("Power consumption zigbee event reported as ${energy_value} W")
 	}
 	else if (descMap.cluster == "0B04") {
-		def power_value = zigbee.convertHexToInt(eventDescMap.value)
-		sendEvent(name: "power", value: power_value, unit: "kWh")
+		def energy_value = zigbee.convertHexToInt(eventDescMap.value)
+		sendEvent(name: "energy", value: energy_value, unit: "kWh")
 
         // Enable debug to see the parsed energy consumption zigbee message
-		displayTraceLog("Energy consumption zigbee event reported as ${power_value} W")
+		displayTraceLog("Energy consumption zigbee event reported as ${power_value} kWh")
 	}
     else if (descMap.cluster == "0008" && descMap.attrId == "0000") {
 		// This is to catch a specific off event that some Xiaomi's outlets generate
