@@ -80,6 +80,7 @@
  *       - fixed cluster 0702 definition (was energy, not power)
  *       - changed code to reflect native zigbee.x methods for power/energy (clusters 0B04 and 0702)
  *       - 1.7.1 update: mixed 0B04 with 0702 due to bad documentation from smartthings
+ *       - 1.7.2 update: removed local execution flags to ensure proper functionality (runLocally: true, executeCommandsLocally: true)
  *
  * --------------------------------------------------------------------------------------------------------------------------------------------------
  *
@@ -117,7 +118,7 @@
 import physicalgraph.zigbee.zcl.DataType
 
 metadata {
-	definition (name: "Xiaomi Zigbee Smart Outlet", namespace: "chares", author: "chares", ocfDeviceType: "oic.d.smartplug", runLocally: true, executeCommandsLocally: true, genericHandler: "Zigbee") {
+	definition (name: "Xiaomi Zigbee Smart Outlet", namespace: "chares", author: "chares", ocfDeviceType: "oic.d.smartplug", genericHandler: "Zigbee") {
 		// The ZNCZ02LM does have Power, Energy, and temperature. but the temperature sensor is unreliable, so it needs an offset. It also has refresh capabilities, but in a custom format.
 		capability "Actuator"
 		capability "Configuration"
