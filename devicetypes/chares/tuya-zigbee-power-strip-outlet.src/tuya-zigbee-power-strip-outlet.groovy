@@ -26,7 +26,7 @@
  */
  
 metadata {
-	definition(name: "Tuya Zigbee Power Strip Outlet", namespace: "chares", author: "chares", ocfDeviceType: "oic.d.smartplug", runLocally: true, executeCommandsLocally: true, genericHandler: "Zigbee") {
+	definition(name: "Tuya Zigbee Power Strip Outlet", namespace: "chares", author: "chares", ocfDeviceType: "oic.d.smartplug", genericHandler: "Zigbee") {
 		capability "Switch"
 		capability "Actuator"
 		capability "Sensor"
